@@ -429,11 +429,22 @@ function getTagsOnHead(prefix) {
         .filter(t => t && (!prefix || t.startsWith(prefix)));
 }
 /**
- * List all tags matching a prefix, sorted newest-first by version refname.
+ * List all tags matching a prefix, sorted newest-first by semver.
  */
 function listTags(prefix) {
     const pattern = prefix ? `"${prefix}*"` : '"*"';
     const out = exec(`git tag -l ${pattern} --sort=-v:refname`);
+    if (!out)
+        return [];
+    return out.split('\n').map(t => t.trim()).filter(Boolean);
+}
+/**
+ * List all tags matching a prefix, sorted newest-first by creation date.
+ * Used to find "the most recently created tag" regardless of semver order.
+ */
+function listTagsByDate(prefix) {
+    const pattern = prefix ? `"${prefix}*"` : '"*"';
+    const out = exec(`git tag -l ${pattern} --sort=-creatordate`);
     if (!out)
         return [];
     return out.split('\n').map(t => t.trim()).filter(Boolean);
@@ -450,62 +461,47 @@ function getRootCommit() {
 /**
  * Core algorithm: determine baseRef and headRef to diff between.
  *
- * Rules:
- * 1. If HEAD has a matching tag:
- *    - Parse it to get version + build
- *    - If same version exists in older tags → BUILD BUMP
- *      → base = earliest tag with this version
- *    - If previous tags have a different version → VERSION BUMP
- *      → base = last tag of the previous version
- *    - If no prior tags at all → first release, base = root commit
- * 2. If HEAD has no matching tag:
- *    → diff most recent matching tag..HEAD
- * 3. If no tags at all:
- *    → isFallback = true (caller should use last N commits)
+ * headRef is always a tag (never raw HEAD), so the diff range is stable
+ * regardless of whether the action runs on the tagged commit or a later one.
+ *
+ * "Current" tag = tag on HEAD if one exists, otherwise most recent tag by date.
+ *
+ * Base selection:
+ *   - Find all tags with a strictly older semver version → use the newest of those
+ *   - If no older version exists (first version ever) → use root commit
+ *   - If no tags at all → isFallback = true
  */
 function resolveBaseRef(tagPrefix, tagPattern) {
     const regex = parseTagPattern(tagPattern);
-    const headTags = getTagsOnHead(tagPrefix);
-    const headTag = headTags.length > 0 ? headTags[0] : null;
+    // Prefer a tag on HEAD, fall back to most recently created tag
+    const onHead = getTagsOnHead(tagPrefix);
+    const currentTagRaw = onHead[0] ?? listTagsByDate(tagPrefix)[0] ?? null;
+    if (!currentTagRaw) {
+        return { baseRef: '', headRef: 'HEAD', isFallback: true };
+    }
+    const currentTag = parseTag(currentTagRaw, regex);
+    if (!currentTag) {
+        core.warning(`Current tag "${currentTagRaw}" does not match pattern — falling back to last N commits`);
+        return { baseRef: '', headRef: 'HEAD', isFallback: true };
+    }
+    // headRef is always the current tag, never raw HEAD
+    const headRef = currentTagRaw;
     const allTagRaw = listTags(tagPrefix);
     const allTags = allTagRaw
         .map(t => parseTag(t, regex))
         .filter((t) => t !== null);
-    if (allTags.length === 0) {
-        return { baseRef: '', headRef: 'HEAD', isFallback: true };
+    const sortedTags = sortParsedTags(allTags);
+    // All tags with a strictly older semver version
+    const olderVersionTags = sortedTags.filter(t => t.raw !== currentTagRaw && compareSemver(t.version, currentTag.version) < 0);
+    if (olderVersionTags.length > 0) {
+        const base = olderVersionTags[olderVersionTags.length - 1];
+        core.info(`Current: ${currentTagRaw} | Base: ${base.raw} (last tag of previous version)`);
+        return { baseRef: base.raw, headRef, isFallback: false };
     }
-    if (headTag) {
-        const parsedHead = parseTag(headTag, regex);
-        if (!parsedHead) {
-            // Tag doesn't match pattern — treat like no tag
-            return { baseRef: allTags[allTags.length - 1].raw, headRef: 'HEAD', isFallback: false };
-        }
-        const sortedTags = sortParsedTags(allTags);
-        const headIdx = sortedTags.findIndex(t => t.raw === headTag);
-        // Tags with the same version (excluding head itself)
-        const sameVersionTags = sortedTags.filter((t, i) => t.version === parsedHead.version && i !== headIdx);
-        if (sameVersionTags.length > 0) {
-            // Build bump: diff from the earliest build of this version
-            const earliestSameVersion = sameVersionTags[0];
-            core.info(`Build bump detected. Diffing from earliest build of ${parsedHead.version}: ${earliestSameVersion.raw}`);
-            return { baseRef: earliestSameVersion.raw, headRef: headTag, isFallback: false };
-        }
-        // Version bump: find the most recent tag of the previous version
-        const previousVersionTags = sortedTags.filter((t, i) => compareSemver(t.version, parsedHead.version) < 0 && i !== headIdx);
-        if (previousVersionTags.length > 0) {
-            const lastPrevVersion = previousVersionTags[previousVersionTags.length - 1];
-            core.info(`Version bump detected. Diffing from last tag of previous version: ${lastPrevVersion.raw}`);
-            return { baseRef: lastPrevVersion.raw, headRef: headTag, isFallback: false };
-        }
-        // First release ever
-        const rootCommit = getRootCommit();
-        core.info(`First release. Diffing from root commit.`);
-        return { baseRef: rootCommit || '', headRef: headTag, isFallback: !rootCommit };
-    }
-    // No tag on HEAD — diff from most recent matching tag to HEAD
-    const latestTag = sortParsedTags(allTags)[allTags.length - 1];
-    core.info(`No tag on HEAD. Diffing from most recent tag: ${latestTag.raw}`);
-    return { baseRef: latestTag.raw, headRef: 'HEAD', isFallback: false };
+    // No older version — this is the first version ever
+    const rootCommit = getRootCommit();
+    core.info(`Current: ${currentTagRaw} | Base: root commit (first version)`);
+    return { baseRef: rootCommit || '', headRef, isFallback: !rootCommit };
 }
 // ---------------------------------------------------------------------------
 // Commit collection
