@@ -1,0 +1,22 @@
+{
+  "name": "changelog-action",
+  "version": "1.0.0",
+  "description": "AI-powered changelog generator from git commits between tags",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc && ncc build build/index.js -o dist --source-map --license licenses.txt",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@actions/core": "^1.10.0",
+    "@actions/github": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@vercel/ncc": "^0.38.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0"
+  }
+}

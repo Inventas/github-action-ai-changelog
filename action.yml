@@ -1,0 +1,57 @@
+name: "AI Changelog Generator"
+description: "Generates AI-powered, user-facing release notes from git commits and diffs. Supports monorepos and configurable tag patterns."
+
+inputs:
+  github_token:
+    description: "GitHub token with models:read permission. Required for GitHub Models API access."
+    required: true
+  tag_prefix:
+    description: "Prefix to filter tags by (e.g., festival-ios, my-app)."
+    required: true
+  tag_pattern:
+    description: >
+      Pattern for parsing tag structure. Use {prefix}, {version}, {build} as placeholders
+      (e.g., {prefix}/{version}/{build}), or provide a raw regex with named capture groups.
+    required: false
+    default: "{prefix}/{version}/{build}"
+  module_paths:
+    description: >
+      Comma-separated list of paths to filter commits for (e.g., modules/events,shared/core).
+      Commits touching these paths are included. Leave empty to include all commits.
+    required: false
+  output_format:
+    description: "Output format: markdown (default) or text."
+    required: false
+    default: "markdown"
+  output_file:
+    description: "File path to write the changelog to (e.g., CHANGELOG.md or fastlane/metadata/en-US/release_notes.txt)."
+    required: false
+  model:
+    description: "GitHub Models model ID in {publisher}/{model} format (e.g., openai/gpt-4.1-mini, openai/gpt-4.1)."
+    required: false
+    default: "openai/gpt-4.1-mini"
+  custom_instructions:
+    description: >
+      Additional instructions for the AI (e.g., 'Write in German', 'Focus on user-facing features,
+      ignore internal refactoring', 'Keep it under 4000 characters for App Store'). Appended to the default prompt.
+    required: false
+  max_diff_size:
+    description: "Maximum characters of diff to include in the AI prompt. Larger diffs are summarized per-file."
+    required: false
+    default: "50000"
+
+outputs:
+  changelog:
+    description: "The generated changelog text."
+  changes_detected:
+    description: "Whether any changes were detected (true/false)."
+  commit_count:
+    description: "Number of commits analyzed."
+
+runs:
+  using: node20
+  main: dist/index.js
+
+branding:
+  icon: file-text
+  color: blue
