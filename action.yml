@@ -1,4 +1,4 @@
-name: "AI Changelog Generator"
+name: "AI Release Notes"
 description: "Generates AI-powered, user-facing release notes from git commits and diffs. Supports monorepos and configurable tag patterns."
 
 inputs:
